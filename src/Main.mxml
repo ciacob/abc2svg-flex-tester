@@ -1,0 +1,917 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009" 
+					   xmlns:s="library://ns.adobe.com/flex/spark" 
+					   xmlns:mx="library://ns.adobe.com/flex/mx"
+					   xmlns:svgr="com.lorentz.SVG.Flex.*"
+					   initialize="_onInitialize (event)"
+					   showStatusBar="false"
+					   width="1280"
+					   height="720">
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	
+	<fx:Style>
+		@namespace s "library://ns.adobe.com/flex/spark";
+		@namespace svgr "com.lorentz.SVG.Flex.*";
+		@namespace mx "library://ns.adobe.com/flex/mx";
+		
+		* {
+			chromeColor: #e0e2e3;
+			color: #313830;
+			symbolColor: #313830;
+		}
+		
+		s|WindowedApplication {
+			fontFamily: sansCFF;
+			fontSize: 14;
+		}
+		
+		s|TextArea {
+			contentBackgroundColor:#f9f8f8;
+			fontFamily: Consolas, Courier, Courier New;
+			fontSize: 14;
+		}
+		
+		mx|Alert {
+			fontFamily: sans;
+		}
+		
+		.panelTitle, .headerPanelTitle {
+			textAlign: center;
+			fontSize: 15;
+			fontFamily: serifCFFBold;
+			color: #636563;
+			fontWeight: bold;
+		}
+		
+		.headerPanelTitle {
+			paddingBottom: 10;
+		}
+	</fx:Style>
+	
+	<fx:Script>
+		<![CDATA[
+			import com.lorentz.SVG.Flex.SVG;
+			import com.lorentz.SVG.events.SVGEvent;
+			import com.lorentz.SVG.text.TextFieldSVGTextDrawer;
+			
+			import mx.collections.ArrayCollection;
+			import mx.controls.Alert;
+			import mx.events.AIREvent;
+			import mx.events.FlexEvent;
+			
+			import spark.events.DropDownEvent;
+			import spark.events.IndexChangeEvent;
+			import spark.events.TextOperationEvent;
+			
+			import ro.ciacob.desktop.io.TextDiskReader;
+			import ro.ciacob.desktop.io.TextDiskWritter;
+			import ro.ciacob.utils.Files;
+			import ro.ciacob.utils.Strings;
+			
+			
+			
+			// Embedding fonts. Our ABC2SVG library only works with these font names:
+			// - "sans-serif";
+			// - "serif";
+			// - "serifItalic";
+			// - "serifBold".
+			//
+			// We map them to two open source fonts, Charter and Open Sans. We use the traditional
+			// TextField API to embed a font file that's relative to your project
+			[Embed(source="fonts/charter-regular.ttf",
+			fontName = "serif",
+			mimeType = "application/x-font-truetype", 
+			fontWeight="normal", 
+			fontStyle="normal",
+			advancedAntiAliasing="true", 
+			embedAsCFF="false")]
+			private var _serifFontCompileHelper:Class;
+			
+			[Embed(source="fonts/charter-italic.ttf",
+			fontName = "serif",
+			mimeType = "application/x-font-truetype", 
+			fontWeight="normal", 
+			fontStyle="italic",
+			advancedAntiAliasing="true", 
+			embedAsCFF="false")]
+			private var _serifItalicFontCompileHelper:Class;
+			
+			[Embed(source="fonts/charter-bold.ttf",
+			fontName = "serif",
+			mimeType = "application/x-font-truetype", 
+			fontWeight="bold", 
+			fontStyle="normal",
+			advancedAntiAliasing="true",
+			embedAsCFF="false")]
+			private var _serifBoldFontCompileHelper:Class;
+			
+			[Embed(source="fonts/opensans-regular.ttf",
+			fontName = "sans",
+			mimeType = "application/x-font-truetype", 
+			fontWeight="normal", 
+			fontStyle="normal",
+			advancedAntiAliasing="true",
+			embedAsCFF="false")]
+			private var _sansSerifFontCompileHelper:Class;
+
+			// For consistency, use the same fonts in the application UI
+			[Embed(source="fonts/charter-bold.ttf",
+			fontName = "serifCFFBold",
+			mimeType = "application/x-font-truetype", 
+			fontWeight="bold", 
+			fontStyle="normal",
+			advancedAntiAliasing="true",
+			embedAsCFF="true")]
+			private var _serifBoldFontCompileHelperCffBold:Class;
+
+			[Embed(source="fonts/opensans-regular.ttf",
+			fontName = "sansCFF",
+			mimeType = "application/x-font-truetype", 
+			fontWeight="normal", 
+			fontStyle="normal",
+			advancedAntiAliasing="true",
+			embedAsCFF="true")]
+			private var _sansSerifFontCompileHelperCff:Class;
+			
+			// Spacer unit to use across the entire UI
+			private static const SPACE : uint = 20;
+			
+			// Colors to use for the UI
+			private static const APP_FILL_COLOR : uint = 0xe0e2e3;
+			private static const PANEL_BORDER_COLOR : uint = 0xE8E7DE;
+			private static const PANEL_FILL_COLOR : uint = 0xF9F8F8;
+			
+			// Name to use for the settings file
+			private static const SETTINGS_FILE_NAME : String = 'settings.json';
+
+			// Folder to save application settings in
+			private static const SETTINGS_HOME : File = File.applicationStorageDirectory;
+			
+			// Folder name to use for the default tests location
+			private static const DEFAULT_TESTS_DIR_NAME : String = 'ABC2SVG Tests';
+			
+			// Default tests location to use
+			private static const DEFAULT_TESTS_HOME : String = (File.desktopDirectory.resolvePath (DEFAULT_TESTS_DIR_NAME)).nativePath;
+			
+			// Extension a file must have in order to be recognized as a test file
+			private static const TEST_FILE_EXTENSION : String = 'abc';
+			
+			// Settings to use when opening the application for the first time
+			private static const DEFAULT_SETTINGS : Object = {
+				testsFolder: DEFAULT_TESTS_HOME,
+				lastLoadedTest : null,
+				abcPanelVisible : true,
+				svgPanelVisible: false,
+				scorePanelVisible : true,
+				scaleFactor: 1
+			};
+			
+			// Message and title to use for an Alert to display when user types in an invalid `tests folder` path.
+			private static const INVALID_FOLDER_MESSAGE : String = 'Provided path "%s" does not point to an existing folder.';
+			private static const INVALID_FOLDER_TITLE : String = 'Invalid Path';
+			
+			// Message to display in the tests list when no test files are available in the given tests folder.
+			private static const TESTS_LIST_PLACEHOLDER : String = 'No tests found';
+			
+			// Dummy SVG string used to clear the rendered score when the need arises.
+			private static const EMPTY_SVG : String = '<svg />';
+			
+			[Bindable] private var _selectedTest : Object;
+			[Bindable] private var _selectedAbc : String;
+			[Bindable] private var _parsingScore : Number = 0;
+			[Bindable] private var _drawingScore : Number = 0;
+			[Bindable] private var _numPages : Number = 0;
+			[Bindable] private var _abcVisible : Boolean;
+			[Bindable] private var _svgVisible : Boolean;
+			[Bindable] private var _scoreVisible : Boolean;
+			[Bindable] private var _scaleFactor : Number;
+			
+			private var _fileReader : TextDiskReader;
+			private var _fileWriter : TextDiskWritter;
+			private var _result : Object;
+			private var _renderer : SVG;
+			private var _drawStart : Date;
+			private var _testsSelectorListWidth : Number;
+			private var _settings : Object;
+			
+			/**
+			 * Checks whether on-disk settings storage has been established
+			 */
+			private function _hasSettingsStorage () : Boolean {
+				var settingsFile : File = SETTINGS_HOME.resolvePath (SETTINGS_FILE_NAME);
+				return settingsFile.exists;
+			}
+			
+			/**
+			 * Saves given settings to disk, or the default settings if none given.
+			 */
+			private function _writeSettings (settings : Object = null) : void {
+				var settingsFile : File = SETTINGS_HOME.resolvePath (SETTINGS_FILE_NAME);
+				var fileContent : String = JSON.stringify (settings || DEFAULT_SETTINGS, null, '\t');
+				_fileWriter.write (fileContent, settingsFile);
+			}
+			
+			/**
+			 * Reads and returns settings from disk. Returns `null` on failure.
+			 */
+			private function _readSettings () : Object {
+				var settings : Object = null;
+				var settingsFile : File = SETTINGS_HOME.resolvePath (SETTINGS_FILE_NAME);
+				var rawSettings : String = (_fileReader.readContent (settingsFile) as String);
+				if (rawSettings) {
+					try {
+						settings = JSON.parse (rawSettings);
+					} catch (e : Error) {e
+						trace ('Could not load settings from disk. ' + e);
+					}
+				}
+				return settings;				
+			}
+			
+			/**
+			 * Returns `true` whether given `file` is a test file. Used as callback for filtering.  
+			 */
+			private function isTestFile (file : File, ...etc) : Boolean {
+				return Files.isFileOfType (file, [TEST_FILE_EXTENSION]);
+			}
+			
+			/**
+			 * Compares given "tests" (i.e., Objects to populate the "testsSelector" dropdown list with)
+			 * alphabetically, by their `label` property. USed as an argument to Array.sort().
+			 */
+			private function compareTestsByName (testA : Object, testB : Object) : int {
+				var nameA : String = testA.label;
+				var nameB : String = testB.label;
+				return (nameA == nameB)? 0 : (nameA > nameB)? 1 : -1;
+			}
+			
+			/**
+			 * Populates the application controls based on current settings.
+			 */
+			private function _updateUI () : void {
+				
+				// Populate tests-related controls
+				if (Files.isValidPath (_settings.testsFolder, false)) {
+					
+					// Tests folder path
+					var testsFolder : File = new File (_settings.testsFolder);
+					testsFolderPath.text = testsFolder.nativePath;
+					
+					// List of available tests
+					if (testsFolder.exists) {
+						var filesInTestsFolder : Vector.<File> = Files.getDirContent (testsFolder, false, 0);
+						var testFiles : Vector.<File> = filesInTestsFolder.filter (isTestFile);
+						var testsList : Array = [];
+						var i:int;
+						var testFile : File;
+						var item : Object;
+						var filePath : String;
+						var haveRequestedTest : Boolean = !!_settings.lastLoadedTest;
+						var testToLoad : Object = null;
+						for (i = 0; i < testFiles.length; i++) {
+							testFile = testFiles[i];
+							filePath = testFile.nativePath;
+							item = {
+								label: Files.removeFileNameExtension (testFile.name),
+								path : filePath
+							};
+							if (haveRequestedTest && (filePath == _settings.lastLoadedTest)) {
+								testToLoad = item;
+							}
+							testsList.push (item);
+						}
+						testsList.sort (compareTestsByName);
+						var testsCollection : ArrayCollection = new ArrayCollection (testsList); 
+						testsSelector.dataProvider = testsCollection;
+						
+						// Update selection inside the list of available tests (also "export"
+						// the selection, to be picked up later by "_loadSelectedTest()").
+						if (!testToLoad && testsCollection.length > 0) {
+							testToLoad = testsCollection.getItemAt (0);
+							_settings.lastLoadedTest = testToLoad.path;
+						}
+						testsSelector.selectedItem = testToLoad;
+						_selectedTest = testToLoad;
+					}
+				}
+
+				// Update panels visibility
+				_abcVisible = _settings.abcPanelVisible;
+				_svgVisible = _settings.svgPanelVisible;
+				_scoreVisible = _settings.scorePanelVisible;
+				
+				// Update score scale factor
+				_scaleFactor = _settings.scaleFactor;
+				scoreScale.value = (_scaleFactor * 100);
+			}
+			
+			/**
+			 * Executes the selected test (loads the abc code from disk if this is the first run
+			 * of that test, parses the ABC and reders the resulting SVG). Depends on 
+			 * `_selectedTest` being previously set.
+			 */
+			private function _loadSelectedTest () : void {
+				if (_selectedTest) {
+					if (!('abc' in _selectedTest)) {
+						if ('path' in _selectedTest) {
+							var testFile : File = new File (_selectedTest.path);
+							_selectedTest.abc = (_fileReader.readContent(testFile) as String);
+						}
+					}
+					_selectedAbc = _selectedTest.abc;
+					_parseMusicAbc();
+					_renderPage (0);					
+				}
+			}
+			
+			/**
+			 * Parses the ABC code contained in the currently selected test and stores
+			 * the outcome (SVG and metadata) inside the `_result` class member.
+			 */
+			private function _parseMusicAbc () : void {
+				var parseStart : Date = new Date;
+				var abc : Abc2Svg = new Abc2Svg ({
+					hotspotStyle : {
+						stroke: '#3983fa',
+						fill: '#6abffc',
+						fillOpacity: 0.4,
+						strokeOpacity: 1
+					}
+				});
+				_result = abc.getSvg (_selectedAbc);
+				_numPages = _result.info.numPages;
+				var parseEnd : Date = new Date;
+				_parsingScore = (parseEnd.getTime() - parseStart.getTime());
+			}
+			
+			/**
+			 * Loads a certain page of an already parsed ABC code into the renderer.
+			 * Does NOT reparse the ABC.
+			 * 
+			 * @param	pageIndex
+			 * 			The 0 based index of the page to render. If the index is out
+			 * 			of range, nothing happens. 
+			 */
+			private function _renderPage (pageIndex : int) : void {
+				if (_result && _result.pages && (pageIndex in _result.pages)) {
+					var svgCode : String = _result.pages[pageIndex].fullSVG;
+					XML.ignoreWhitespace = true;
+					svgText.text = (new XML (svgCode)).toXMLString();
+					_drawStart = new Date;
+					if (!_renderer) {
+						_renderer = new SVG;
+						_renderer.validateWhileParsing = false;
+						_renderer.forceSynchronousParse = true;
+						_renderer.defaultFontName = 'serif';
+						_renderer.textDrawer = new TextFieldSVGTextDrawer;
+						_renderer.useEmbeddedFonts = true;
+						_renderer.addEventListener (SVGEvent.RENDERED, _onScoreRendered);
+						renderingArea.addElement(_renderer);
+					}
+					_renderer.source = svgCode;
+				}
+			}
+			
+			/**
+			 * Executed when the application first initializes. Parses and renders the first
+			 * test in the list of built-in ABC snippets.
+			 */
+			private function _onInitialize (event:FlexEvent) : void {
+				_fileReader = new TextDiskReader;
+				_fileWriter = new TextDiskWritter;
+				NativeApplication.nativeApplication.addEventListener (Event.EXITING, _onApplicationExiting);
+				if (!_hasSettingsStorage()) {
+					_writeSettings ();
+				}
+				_settings = (_readSettings() || DEFAULT_SETTINGS);
+				_updateUI();
+				_loadSelectedTest();
+			}
+			
+			/**
+			 * Executed when the "exiting" sequence of this application has started. Causes the settings
+			 * to be saved on disk.
+			 */
+			private function _onApplicationExiting (event : Event) : void {
+				_writeSettings (_settings);
+			}
+			
+			/**
+			 * Executed when the score has finished drawing.
+			 */
+			private function _onScoreRendered (event : SVGEvent) : void {
+				var drawEnd : Date = new Date;
+				var drawingTime : Number = drawEnd.getTime() - _drawStart.getTime();
+				_drawingScore = drawingTime;
+			}
+			
+			
+			/**
+			 * Executed when the page number has been changed in the score page selector.
+			 */
+			private function _onPageChange(event:Event):void {
+				_renderPage (pageSelector.value - 1);
+			}
+			
+			/**
+			 * Executed when the score scale has been changed.
+			 */
+			private function _onScaleChange (event : Event) : void {
+				var rawValue : Number = scoreScale.value;
+				if (!rawValue) {
+					rawValue = 100;
+					scoreScale.value = 100;
+				}
+				_scaleFactor = (rawValue * 0.01);
+				_settings.scaleFactor = _scaleFactor;
+			}
+			
+			/**
+			 * Executed when a test has been selected in the tests selector list.
+			 */
+			private function _onTestSelected (event:IndexChangeEvent) : void {
+				_selectedTest = (testsSelector.selectedItem as Object);
+				_settings.lastLoadedTest = _selectedTest.path;
+				_loadSelectedTest();
+			}
+			
+			/**
+			 * Executed before the drop down list of the tests selector opens. Aproximates the
+			 * width the list needs to have, in order to fully display its longest label. Results
+			 * are cached.
+			 */
+			private function _onListOpening (event : DropDownEvent) : void {
+				if (!_testsSelectorListWidth) {
+					var longestLabel : String = null;
+					var testItemsList : ArrayCollection = (testsSelector.dataProvider as ArrayCollection);
+					if (testItemsList) {
+						for (var i:int = 0; i < testItemsList.length; i++) {
+							var testItem : Object = (testItemsList.getItemAt (i) as Object);
+							var label : String = (testItem.label as String);
+							if (!longestLabel) {
+								longestLabel = label;
+								continue;
+							}
+							if (label.length > longestLabel.length) {
+								longestLabel = label;
+							}
+						}
+						var tempText : Label = new Label;
+						tempText.regenerateStyleCache(false);
+						var lineMetrics:TextLineMetrics = tempText.measureText (longestLabel);
+						_testsSelectorListWidth = Math.max (testsSelector.width, lineMetrics.width * 1.5);
+					}
+				}
+				testsSelector.dropDown.width = _testsSelectorListWidth || testsSelector.width;
+			}
+			
+			/**
+			 * Executed when one of the "visibility" checkboxes is changed state. Causes the relevant
+			 * UI panel to be shown or hidden.
+			 */
+			private function _onPanelVisibilityToggled (event : Event) : void {
+				var target : ToggleButton = (event.target as ToggleButton);
+				switch (target) {
+					case abcToggleButton:
+						_abcVisible = !_abcVisible;
+						_settings.abcPanelVisible = _abcVisible;
+						break;
+					
+					case svgToggleButton:
+						_svgVisible = !_svgVisible;
+						_settings.svgPanelVisible = _svgVisible;
+						break;
+					
+					case scoreToggleButton:
+						_scoreVisible = !_scoreVisible;
+						_settings.scorePanelVisible = _scoreVisible;
+						break;
+				}
+			}
+			
+			/**
+			 * Executed when the "apply [tests folder path]" button is clicked.
+			 *
+			 * Provided that the entered folder path is valid, and that the respective
+			 * folder contains one or more test files, a click on the "Apply" button will
+			 * reset the content and selection of the available tests list, and will cause
+			 * the user interface to repopulate. The first test file among the available
+			 * ones will be automatically loaded.
+			 */
+			private function _onTestsFolderPathSubmitted (event : MouseEvent) : void {
+				var button : Button = (event.target as Button);
+				button.enabled = false;
+				var path : String = Strings.trim (testsFolderPath.text);
+				if (Files.isValidPath (path)) {
+					var testsFolder : File = new File (path);
+					if (testsFolder.isDirectory) {
+						_settings.lastLoadedTest = null;						
+						_selectedTest = null;
+						_selectedAbc = null;
+						svgText.text = null;
+						if (_renderer) {
+							_renderer.source = EMPTY_SVG;
+						}
+						_settings.testsFolder = testsFolder.nativePath;
+						_updateUI();
+						_loadSelectedTest();
+						return;
+					}
+				}
+				Alert.show (Strings.sprintf (INVALID_FOLDER_MESSAGE, path), INVALID_FOLDER_TITLE);
+			}
+			
+			/**
+			 * Executed when the text inside the "testsFolderPath" TextInput is changed. Causes the
+			 * "Apply" button to become available if a likely valid folder path was provided.
+			 */
+			private function _onTestsFolderPathChanged (event : TextOperationEvent) : void {
+				var currentPath : String = Strings.trim (testsFolderPath.text);
+				var haveContent : Boolean = (currentPath.length > 0);
+				var haveChange : Boolean = (currentPath != _settings.testsFolder);
+				applyFolderPath.enabled = (haveContent && haveChange);
+			}
+			
+		]]>
+	</fx:Script>
+	
+	
+	<!-- Main UI Container -->
+	<s:Group
+		width="100%"
+		height="100%">
+		<s:Rect width="100%" 
+				height="100%">
+			<s:fill>
+				<mx:SolidColor color="{APP_FILL_COLOR}" />
+			</s:fill>
+		</s:Rect>
+	
+		<s:Group width="100%" height="100%">
+			<s:layout>
+				<s:VerticalLayout 
+					paddingTop="{SPACE}"
+					paddingRight="{SPACE}"
+					paddingBottom="{SPACE}"
+					paddingLeft="{SPACE}"
+					gap="{SPACE}"
+					horizontalAlign="justify" />
+			</s:layout>
+			
+			<!-- Header. Holds the application controls -->
+			<s:Group>
+				<s:layout>
+					<s:HorizontalLayout 
+						gap="{SPACE}"
+						verticalAlign="middle"
+						paddingBottom="{SPACE * 0.5}" />
+				</s:layout>
+				
+				<!-- GROUP: Tests Related Controls -->
+				<s:Group>
+					<s:layout>
+						<s:VerticalLayout 
+							gap="{SPACE * 0.1}"
+							horizontalAlign="justify" />
+					</s:layout>
+					
+					<!-- Group label -->
+					<s:Label styleName="headerPanelTitle" text="Tests" />
+					
+					<!-- Tests Folder -->
+					<s:Group width="100%">
+						<s:layout>
+							<s:HorizontalLayout 
+								gap="{SPACE * 0.3}"
+								verticalAlign="middle"
+								paddingBottom="{SPACE * 0.5}" />
+						</s:layout>
+						
+						<s:Label
+							text="Tests folder:"
+							minWidth="{SPACE * 4.2}" />
+						
+						<s:TextInput
+							width="100%"
+							id="testsFolderPath"
+							change="_onTestsFolderPathChanged(event)" />
+						
+						<s:Button
+							id="applyFolderPath"
+							label="Apply"
+							enabled="false"
+							height="100%"
+							click="_onTestsFolderPathSubmitted (event)" />
+					</s:Group>
+					
+					<!-- Tests Selector -->
+					<s:Group width="100%">
+						<s:layout>
+							<s:HorizontalLayout 
+								gap="{SPACE * 0.3}"
+								verticalAlign="middle"
+								paddingBottom="{SPACE * 0.5}" />
+						</s:layout>
+						
+						<s:Label
+							text="Current test:"
+							minWidth="{SPACE * 4.2}" />
+						
+						<s:DropDownList
+							prompt="{TESTS_LIST_PLACEHOLDER}"
+							id="testsSelector"
+							enabled="{testsSelector.dataProvider &amp;&amp; testsSelector.dataProvider.length &gt; 0}"
+							selectedItem="{_selectedTest}"
+							width="100%"
+							height="100%"
+							open="_onListOpening (event)"
+							change="_onTestSelected (event)" />
+					</s:Group>
+				</s:Group>
+					
+				<s:Group width="{SPACE}" />
+			
+				<!-- GROUP: UI Related Controls -->
+				<s:Group height="100%">
+					<s:layout>
+						<s:VerticalLayout 
+							gap="{SPACE * 0.1}"
+							horizontalAlign="justify" />
+					</s:layout>
+					
+					<!-- Group label -->
+					<s:Label 
+						styleName="headerPanelTitle" 
+						text="UI" />
+				
+					<!-- Panels Selector -->
+					<s:Group width="100%">
+						<s:layout>
+							<s:HorizontalLayout 
+								gap="{SPACE * 0.3}"
+								verticalAlign="middle"
+								paddingBottom="{SPACE * 0.5}" />
+						</s:layout>
+					
+						<s:Label text="Visible panels:" />
+						
+						<s:ToggleButton
+							id="abcToggleButton"
+							label="ABC"
+							selected="{_abcVisible}"
+							height="100%"
+							change="_onPanelVisibilityToggled (event)" />
+						
+						<s:ToggleButton
+							id="svgToggleButton"
+							label="SVG"
+							selected="{_svgVisible}"
+							height="100%"
+							change="_onPanelVisibilityToggled (event)" />
+						
+						<s:ToggleButton
+							id="scoreToggleButton"
+							label="Score"
+							selected="{_scoreVisible}"
+							height="100%"
+						change="_onPanelVisibilityToggled (event)" />
+					
+					</s:Group>
+				</s:Group>
+				
+				<s:Group width="{SPACE}" />
+				
+				<!-- GROUP: Score Related Controls -->
+				<s:Group height="100%">
+					<s:layout>
+						<s:VerticalLayout 
+							gap="{SPACE * 0.1}"
+							horizontalAlign="justify" />
+					</s:layout>
+					
+					<!-- Group label -->
+					<s:Label 
+						styleName="headerPanelTitle" 
+						text="Score" />
+					
+					<!-- Score Page Selector -->
+					<s:Group width="100%">
+						<s:layout>
+							<s:HorizontalLayout 
+								gap="{SPACE * 0.3}"
+								verticalAlign="middle"
+								paddingBottom="{SPACE * 0.5}" />
+						</s:layout>
+					
+						<s:Label
+							text="Page:"
+							minWidth="{SPACE * 2.5}"/>
+						
+						<s:NumericStepper 
+							id="pageSelector"
+							maximum="{_numPages}"
+							minimum="1"
+							stepSize="1"
+							value="1"
+							change="_onPageChange(event)"
+							focusEnabled="false"
+							enabled="{_numPages &gt; 1}" />
+						<s:Label text="of {_numPages}" />
+						
+					</s:Group>
+					
+					<!-- Score Zoom -->
+					<s:Group width="100%">
+						<s:layout>
+							<s:HorizontalLayout 
+								gap="{SPACE * 0.3}"
+								verticalAlign="middle"
+								paddingBottom="{SPACE * 0.5}" />
+						</s:layout>
+						
+						<s:Label
+							text="Scale:"
+							minWidth="{SPACE * 2.5}"/>
+						
+						<s:NumericStepper 
+							id="scoreScale"
+							maximum="500"
+							minimum="25"
+							stepSize="1"
+							focusEnabled="false"
+							change="_onScaleChange(event)" />
+						<s:Label text="%" />
+					</s:Group>
+				</s:Group>
+			</s:Group>
+			
+			<!-- Body. Holds the application panels  -->
+			<s:Group height="100%">
+				<s:layout>
+					<s:HorizontalLayout
+						verticalAlign="justify"
+						gap="{SPACE}" />
+				</s:layout>
+				
+				<!-- Source Code Panel -->
+				<s:Group
+					visible="{_abcVisible}"
+					includeInLayout="{_abcVisible}"
+					width="100%"
+					height="100%">
+					<s:Rect width="100%" 
+							height="100%"
+							radiusX="1.5"
+							radiusY="1.5">
+						<s:stroke>
+							<mx:SolidColorStroke color="{PANEL_BORDER_COLOR}" />
+						</s:stroke>
+						<s:fill>
+							<mx:SolidColor color="{PANEL_FILL_COLOR}" />
+						</s:fill>
+					</s:Rect>
+					
+					<s:Group
+						width="100%"
+						height="100%">
+						<s:layout>
+							<s:VerticalLayout 
+								gap="{SPACE * 0.5}"
+								horizontalAlign="justify"
+								paddingTop="{SPACE * 0.4}"
+								paddingRight="{SPACE * 0.4}"
+								paddingBottom="{SPACE * 0.4}"
+								paddingLeft="{SPACE * 0.4}" />
+						</s:layout>
+	
+						<s:Label 
+							styleName="panelTitle"
+							text="Source MusicABC code" />
+						
+						<s:TextArea
+							id="abcText"
+							text="{_selectedAbc}"
+							editable="false"
+							width="100%"
+							height="100%"
+							focusEnabled="false"
+							borderVisible="false"
+							lineBreak="explicit" />
+					</s:Group>
+				</s:Group>
+				
+				<!-- Generated Code Panel -->
+				<s:Group
+					visible="{_svgVisible}"
+					includeInLayout="{_svgVisible}"
+					width="100%"
+					height="100%">
+					<s:Rect width="100%" 
+							height="100%"
+							radiusX="1.5"
+							radiusY="1.5">
+						<s:stroke>
+							<mx:SolidColorStroke color="{PANEL_BORDER_COLOR}" />
+						</s:stroke>
+						<s:fill>
+							<mx:SolidColor color="{PANEL_FILL_COLOR}" />
+						</s:fill>
+					</s:Rect>
+					
+					<s:Group
+						width="100%"
+						height="100%">
+						<s:layout>
+							<s:VerticalLayout 
+								gap="{SPACE * 0.5}"
+								horizontalAlign="justify"
+								paddingTop="{SPACE * 0.4}"
+								paddingRight="{SPACE * 0.4}"
+								paddingBottom="{SPACE * 0.4}"
+								paddingLeft="{SPACE * 0.4}" />
+						</s:layout>
+						
+						<s:Label
+							styleName="panelTitle"
+							text="Generated SVG code" />
+						
+						<s:TextArea
+							id="svgText"
+							borderVisible="false"
+							focusEnabled="false"
+							editable="false"
+							width="100%"
+							height="100%"
+							lineBreak="explicit" />
+					</s:Group>
+				</s:Group>
+				
+				<!-- Rendering Panel -->
+				<s:Group
+					visible="{_scoreVisible}"
+					includeInLayout="{_scoreVisible}"
+					width="100%"
+					height="100%">
+					<s:Rect width="100%" 
+							height="100%"
+							radiusX="1.5"
+							radiusY="1.5">
+						<s:stroke>
+							<mx:SolidColorStroke color="{PANEL_BORDER_COLOR}" />
+						</s:stroke>
+						<s:fill>
+							<mx:SolidColor color="{PANEL_FILL_COLOR}" />
+						</s:fill>
+					</s:Rect>
+					
+					<s:Group
+						width="100%"
+						height="100%">
+						<s:layout>
+							<s:VerticalLayout 
+								gap="{SPACE * 0.5}"
+								horizontalAlign="justify"
+								paddingTop="{SPACE * 0.4}"
+								paddingRight="{SPACE * 0.4}"
+								paddingBottom="{SPACE * 0.4}"
+								paddingLeft="{SPACE * 0.4}" />
+						</s:layout>
+						
+						<s:Label styleName="panelTitle" text="Rendered SVG Score" />
+						<s:Scroller width="100%" height="100%">
+							<s:Group 
+								id="renderingArea" 
+								scaleX="{_scaleFactor}"
+								scaleY="{_scaleFactor}">
+								<s:layout>
+									<s:VerticalLayout gap="{SPACE}" />
+								</s:layout>
+							</s:Group>
+						</s:Scroller>
+					</s:Group>
+				</s:Group>
+				
+				<!-- Settings Panel -->
+				
+				<!-- Info Panel -->
+			</s:Group>
+			
+			<!-- Footer. Holds status and benchmark information -->
+			<s:Group>
+				<s:layout>
+					<s:HorizontalLayout 
+						gap="{SPACE}"
+						verticalAlign="middle" />
+				</s:layout>
+				
+				<s:Label text="Parsing ABC done in {_parsingScore}; drawing SVG done in {_drawingScore}. Total initial lag: {_parsingScore + _drawingScore} (milliseconds)." />
+			</s:Group>
+			
+		</s:Group>
+	</s:Group>
+	
+	
+	
+</s:WindowedApplication>
